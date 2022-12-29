@@ -1,0 +1,5 @@
+1. Client connects to server & server responds with A single message.
+    |
+     -> Uni directional messgae from the server to client. - DONE
+
+2. Bi directional communication TODO.
