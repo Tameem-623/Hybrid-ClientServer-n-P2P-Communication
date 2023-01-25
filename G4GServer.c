@@ -10,6 +10,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/time.h> //FD_SET, FD_ISSET, FD_ZERO macros
+#include <signal.h>
+#include <unistd.h>
 
 // for IP printing
 #include <netdb.h>
@@ -26,9 +28,9 @@
 
 typedef struct
 {
-    char *endpointIP;
+    char endpointIP[15];
     int endpointPort;
-}ENDPOINT;
+} ENDPOINT;
 
 typedef struct
 {
@@ -47,7 +49,7 @@ void CLIENTDB_ZERO(CLIENTDB *Entry)
     Entry->port = 0;
     Entry->status = 0;
     Entry->client_EP.endpointPort = 0;
-    Entry->client_EP.endpointIP = '\0';
+    Entry->client_EP.endpointIP;
 }
 
 void CLIENTDB_ADD(CLIENTDB *Entry, char *name, char *ip, int port, int Status)
@@ -87,16 +89,31 @@ void printIP()
             if (!strcmp(ifa->ifa_name, "eth0"))
             {
                 // printf("Interface: %s\n", ifa->ifa_name);
-                printf("IP Address: %s\n", host);
+                printf("[*] Server IP Address: %s\n", host);
             }
         }
     }
     freeifaddrs(ifaddr);
 }
 
+void Terminate_Server(int signal)
+{
+    printf("\n[*] Terminating the Server ... \n");
+    close(PORT);
+    printf("[*] Terminated.\n");
+    exit(EXIT_SUCCESS);
+}
+
 int main(int argc, char *argv[])
 {
     /* MARK - New Test start, DB code Integration*/
+    sigset_t set;
+    struct sigaction act = { 0 };
+    act.sa_handler = Terminate_Server;
+    sigfillset(&set);
+    sigaction(SIGINT, &act, NULL);
+    sigdelset(&set, SIGINT);
+
     printIP();
     CLIENTDB Handle_Client[MAX_CLIENTS];
     int opt = TRUE;
@@ -261,20 +278,20 @@ int main(int argc, char *argv[])
                         if (Handle_Client[i].IP == NULL)
                             continue;
                         printf("\t-> Client: %d - IP/PORT : %s:%d\n", i, Handle_Client[i].IP, Handle_Client[i].port);
-                        // sprintf(LIST, "\t-> Client: %d - IP/PORT : %s:%d\n", i, Handle_Client[i].IP, Handle_Client[i].port);
                     }
                     if (choice == 7)
                     {
                         read(socket_fd, &(Handle_Client[i].client_EP.endpointPort), sizeof(int));
+                        read(socket_fd, (Handle_Client[i].client_EP.endpointIP), 15);
                     }
-                    
-                    if (choice == 1)    // to send Online Users to Client
+
+                    if (choice == 1) // to send Online Users to Client
                     {
                         for (int i = 0; i < MAX_CLIENTS; i++)
                         {
                             if (Handle_Client[i].IP == NULL)
                                 continue;
-                            dprintf(socket_fd, "\t-> Client: %d -IP/PORT: %s:%d -ENDPOINT PORT %d\n", i, Handle_Client[i].IP, Handle_Client[i].port, Handle_Client[i].client_EP.endpointPort);
+                            dprintf(socket_fd, "\t-> Client: %d - ENDPOINT IP/PORT :  %s:%d\n", i, Handle_Client[i].client_EP.endpointIP, Handle_Client[i].client_EP.endpointPort);
                             // sprintf(LIST, "\t-> Client: %d - IP/PORT : %s:%d\n", i, Handle_Client[i].IP, Handle_Client[i].port);
                         }
                     }
@@ -289,14 +306,6 @@ int main(int argc, char *argv[])
                         //     write(socket_fd, "-1", sizeof(int));
                         // }
                     }
-
-                    // set the string terminating NULL byte on the end
-                    // of the data read
-                    // buffer[valread] = '\0';
-                    // send(socket_fd, buffer, strlen(buffer), 0);
-
-                    /* Now sending one client port to the other. The first client will act as a server and
-                     the other will try to connect to that server using the port */
                 }
             }
         }

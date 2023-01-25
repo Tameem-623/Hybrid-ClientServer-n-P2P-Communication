@@ -6,9 +6,14 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+// for IP printing
+#include <netdb.h>
+#include <ifaddrs.h>
 
 #define MAX_MESSAGE_LENGTH 1024
 #define ENDPOINTPORT 3592
+#define NI_MAXHOST 1025
+#define NI_NUMERICHOST 1
 
 void Server_Chat(int socket)
 {
@@ -23,11 +28,57 @@ void Client_Chat(int socket)
     message = "Hello";
     write(socket, message, strlen(message) + 1);
     sleep(1);
-    read(socket, message, strlen("Hi")+1);
+    read(socket, message, strlen("Hi") + 1);
     printf("Message from Client : %s", message);
+}
+
+char IP[14];
+
+int printIP()
+{
+    struct ifaddrs *ifaddr, *ifa;
+    int family;
+    char host[NI_MAXHOST];
+
+    if (getifaddrs(&ifaddr) == -1)
+    {
+        perror("getifaddrs");
+        return -1;
+    }
+    // Iterate through the list of interfaces
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
+    {
+        if (ifa->ifa_addr == NULL)
+        {
+            continue;
+        }
+        family = ifa->ifa_addr->sa_family;
+
+        // Only consider IPv4
+        if (family == AF_INET)
+        {
+            // Get the address as a string
+            getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in), host, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+
+            if (strcmp(ifa->ifa_name, "lo"))
+            {
+                // printf("Interface: %s\n", ifa->ifa_name);
+                // printf("IP Address: %s\n", host);
+                strcpy(IP, host);
+                return 0;
+            }
+        }
+    }
+    freeifaddrs(ifaddr);
 }
 int main(int agrc, char *argv[])
 {
+    if (agrc == 1)
+    {
+        printf("Usage Error!\n%s <IP Address of Server>", argv[0]);
+        return EXIT_FAILURE;
+    }
+
     int netwrok_socket;
     // int socket(int __domain, int __type, int __protocol) - Returns fd or -1
 
@@ -77,10 +128,24 @@ int main(int agrc, char *argv[])
             sleep(1);
             int port = ENDPOINTPORT;
             write(netwrok_socket, &port, sizeof(int));
+            if (!printIP())
+            {
+                int wr;
+                if ((wr = write(netwrok_socket, IP, strlen(IP) + 1)) == -1)
+                {
+                    perror("FAiled to write: ");
+                    return -1;
+                }
+                printf("IP : %s\n", IP);
+            }
+            else
+            {
+                printf("[-] FAILED to retrieve IP!\n");
+            }
         }
         printf("[*] Press\n\t1. See Online Users\n\t2. Connect to an Endpoint.\n\t3. Exit\n\t-> Enter Choice : ");
         scanf("%d", &choice);
- 
+
         if (choice == 1)
         {
             write(netwrok_socket, &choice, sizeof(int));
@@ -93,22 +158,21 @@ int main(int agrc, char *argv[])
         else if (choice == 2)
         {
             close(netwrok_socket);
-            int port_nmbr;
-            // Send a specific identifier to get relevant address from client
-            printf("[*] Enter PORT Number : ");
-            scanf("%d", &port_nmbr);
+            // Enter ip/port of another user for P2P Communication.
             int P2P_socket;
             P2P_socket = socket(PF_INET, SOCK_STREAM, 0);
-            struct sockaddr_in P2P_address;
-            P2P_address.sin_family = PF_INET;
-            P2P_address.sin_port = htons(port_nmbr);
-            P2P_address.sin_addr.s_addr = inet_addr(argv[1]);
 
             // prompt user to act as client or server, this should be mutually exclusive.
-            printf("[*] Act as Server (0) : ");
-            scanf("%d", &port_nmbr);
-            if (port_nmbr == 0) // this is for server
+            int MODE;
+            printf("[*] Act as Server - 0, Client - 1 : ");
+            scanf("%d", &MODE);
+            if (MODE == 0) // this is for server
             {
+                struct sockaddr_in P2P_address;
+                P2P_address.sin_family = PF_INET;
+                P2P_address.sin_port = htons(ENDPOINTPORT);
+                P2P_address.sin_addr.s_addr = inet_addr(IP);
+
                 // bind the socket to localhost port
                 if (bind(P2P_socket, (struct sockaddr *)&P2P_address, sizeof(P2P_address)) < 0)
                 {
@@ -133,6 +197,18 @@ int main(int agrc, char *argv[])
             }
             else // for acting as client
             {
+
+                char ip_address[15];
+                printf("[*] Enter IP Address of User : ");
+                scanf("%s", ip_address);
+                int port_nmbr;
+                printf("[*] Enter PORT Number : ");
+                scanf("%d", &port_nmbr);
+
+                struct sockaddr_in P2P_address;
+                P2P_address.sin_family = PF_INET;
+                P2P_address.sin_port = htons(port_nmbr);
+                P2P_address.sin_addr.s_addr = inet_addr(ip_address);
 
                 int connection_status_P2P = connect(P2P_socket, (struct sockaddr *)&P2P_address, sizeof(P2P_address));
                 if (connection_status_P2P == -1)
