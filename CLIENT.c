@@ -10,26 +10,213 @@
 #include <netdb.h>
 #include <ifaddrs.h>
 
+#include <fcntl.h>
+#include <dirent.h>
+#include <sys/stat.h>
+
 #define MAX_MESSAGE_LENGTH 1024
 #define ENDPOINTPORT 3592
 #define NI_MAXHOST 1025
 #define NI_NUMERICHOST 1
 
+void File_Request_Handler(int socket)
+{ // Server File Request Handler
+    while (1)
+    {
+        char buff[255];
+        int br = read(socket, buff, 255);       // Server: Receives the request
+        if (br < 0)
+        {
+            perror("FIALED to read : ");
+            return;
+        }
+        // Server: Sends the list of contents of default directory to the client
+        if (strcmp(buff, "listdirent") == 0)
+        {
+            DIR *dirp = opendir(".");
+            struct dirent *direntp;
+            char direntcontent[512] = "";
+
+            while ((direntp = readdir(dirp)) != NULL)
+            {
+                if (direntp->d_name[0] == '.' || direntp->d_name == "..")
+                    continue;
+                strcat(direntcontent, "    > ");
+                strcat(direntcontent, direntp->d_name);
+                strcat(direntcontent, "\n");
+            }
+
+            int wr = write(socket, direntcontent, strlen(direntcontent) + 1);
+            if (wr < 0)
+            {
+                perror("FAILED to write : ");
+                return;
+            }
+            sleep(3);
+        }
+        else //	Server: Receives the request having dir entry name.
+        {
+            printf("[*] Request from Client : %s \n", buff);
+            struct stat stat_buff;
+            int r = stat(buff, &stat_buff);
+            // a.  If the requested item is a file, server first responds with “Sending file”
+            if (S_ISREG(stat_buff.st_mode))
+            {
+                int br = write(socket, "Sending file", 13);
+                if (br < 0)
+                {
+                    perror("FAILED to write : ");
+                    return;
+                }
+                // sends the contents of the files after a pause of 5 seconds and go back to the default directory
+                sleep(5);
+                char fileBuff[1024];
+                int requestedFile_fd = open(buff, O_RDONLY);
+                if (requestedFile_fd == -1)
+                {
+                    printf("[-] Exiting File Handling Mode. \n");
+                    return;
+                }
+                int br1 = read(requestedFile_fd, fileBuff, 1024);
+                if (br1 == -1)
+                {
+                    perror("FAILED to read from requested file: ");
+                    return;
+                }
+                write(socket, fileBuff, br1);
+                sleep(2);
+                chdir(".");
+                printf("[-] Exiting File Handling Mode.\n");
+                break;
+            }
+            //  b.	If the requested item is a directory, sever first responds with “Listing directory”
+            if (S_ISDIR(stat_buff.st_mode))
+            {
+                write(socket, "Listing directory", 18);
+                sleep(5);
+                // c.	Server opens the requested directory and goes back to step 5 after a pause of 5 seconds
+                DIR *dirp = opendir(buff);
+                struct dirent *direntp;
+                char direntcontent[512] = "";
+                while ((direntp = readdir(dirp)) != NULL)
+                {
+                    if (direntp->d_name[0] == '.' || direntp->d_name == "..")
+                        continue;
+                    strcat(direntcontent, "    > ");
+                    strcat(direntcontent, direntp->d_name);
+                    strcat(direntcontent, "\n");
+                }
+                int wr = write(socket, direntcontent, strlen(direntcontent) + 1);
+                if (wr < 0)
+                {
+                    perror("FAILED to write : ");
+                    return;
+                }
+                sleep(2);
+            }
+            if (!S_ISDIR(stat_buff.st_mode) && !S_ISREG(stat_buff.st_mode))
+            {
+                printf("[-] Exiting File Handling Mode.\n");
+                break;
+            }
+        }
+    }
+}
+
+void File_Request(int fd)
+{ // Client Request File.
+
+    // Client: Sends a request for list of available files and directories
+    char req_buffer[] = "listdirent";
+    write(fd, req_buffer, sizeof(req_buffer));
+    sleep(1);
+    char response_buf[512];
+    int br;
+LISTDIR:
+    // Client: Receives the list of files and directories and
+    br = read(fd, response_buf, 512);
+    if (br == -1)
+    {
+        perror("FAIELD to read : ");
+        return;
+    }
+    printf("[*] List : \n%s", response_buf);
+
+    // select a name and request the server for its contents
+    char name[10];
+    printf("[*] Enter a file name/path : ");
+    scanf("%s", name);
+    write(fd, name, strlen(name) + 1);
+    sleep(1);
+
+    // Client: Receives the response from the server
+    char res_buff[20];
+    read(fd, res_buff, 20);
+    printf("[*] Server is %s.\n", res_buff);
+
+    // If the response received is “Listing directory”, go back step 6
+    if (!strcmp(res_buff, "Listing directory"))
+    {
+        goto LISTDIR;
+    }
+    // If the response received is “Sending file”, receive the contents and save them into a new file
+    if (!strcmp(res_buff, "Sending file"))
+    {
+        char FileContent[1024];
+        int br;
+
+        sleep(3);
+        int br1 = read(fd, FileContent, 1024);
+        if (br1 == -1)
+        {
+            perror("FAIELD to read from fifo: ");
+            return;
+        }
+        printf("[*] File Contents : \n\t-> %s", FileContent);
+        printf("[*] File is recieved.\n[*] Exiting File Requesting Mode\n");
+        write(fd, "ESC", strlen("ESC") + 1);
+    }
+}
+
 void Server_Chat(int socket)
 {
-    char buf[5];
-    read(socket, buf, 5);
-    printf("Message : %s\n", buf);
-    write(socket, "Hi", strlen("Hi") + 1);
+    File_Request_Handler(socket);
 }
 void Client_Chat(int socket)
 {
-    char *message;
-    message = "Hello";
-    write(socket, message, strlen(message) + 1);
-    sleep(1);
-    read(socket, message, strlen("Hi") + 1);
-    printf("Message from Client : %s", message);
+    while (1)
+    {
+        printf("[*] Enter your choice:\n\t 1. Chat \n\t 2. Request File\n\t 3. Exit\n\t -> Enter Choice : ");
+        int choice = 0;
+        scanf("%d", &choice);
+        if (choice == 1) // Chat
+        {
+            while (1)
+            {
+                char client_m[1000];
+                read(STDIN_FILENO, client_m, sizeof(client_m) + 1);
+                write(socket, client_m, strlen(client_m) + 1);
+                memset(client_m, 0, sizeof(client_m));
+                // sleep(1);
+                read(socket, client_m, sizeof(client_m) + 1);
+                printf("Message: %s", client_m);
+            }
+        }
+        else if (choice == 2) // File
+        {
+
+            File_Request(socket);
+        }
+        else if (choice == 3)
+        {
+            printf("[-] Exiting the client\n");
+            exit(0);
+        }
+        else
+        {
+            printf("[-] Invalid choice.\n");
+        }
+    }
 }
 
 char IP[14];
@@ -71,6 +258,22 @@ int printIP()
     }
     freeifaddrs(ifaddr);
 }
+
+void intro()
+{
+    system("clear");
+    printf("$$$$$$\\  $$\\ $$\\                      $$\\ \n");
+    printf("$$  __$$\\ $$ |\\__|                     $$ |  \n");
+    printf("$$ /  \\__|$$ |$$\\  $$$$$$\\  $$$$$$$\\ $$$$$$\\ \n");
+    printf("$$ |      $$ |$$ |$$  __$$\\ $$  __$$\\_$$  _|  \n");
+    printf("$$ |      $$ |$$ |$$$$$$$$ |$$ |  $$ | $$ |  \n");
+    printf("$$ |  $$\\ $$ |$$ |$$   ____|$$ |  $$ | $$ |$$\\ \n");
+    printf("\\$$$$$$  |$$ |$$ |\\$$$$$$$\\ $$ |  $$ | \\$$$$  | \n");
+    printf("\\______/ \\__|\\__| \\_______|\\__|  \\__|  \\____/       SP Project\n");
+
+    printf("\n[+] Cleint Strated Successfully \n");
+}
+
 int main(int agrc, char *argv[])
 {
     if (agrc == 1)
@@ -78,7 +281,7 @@ int main(int agrc, char *argv[])
         printf("Usage Error!\n%s <IP Address of Server>", argv[0]);
         return EXIT_FAILURE;
     }
-
+    intro();
     int netwrok_socket;
     // int socket(int __domain, int __type, int __protocol) - Returns fd or -1
 
@@ -123,7 +326,6 @@ int main(int agrc, char *argv[])
     {
         if (choice == 7) // to send endpoint to server.
         {
-            // for now just port since its a localhost
             write(netwrok_socket, &choice, sizeof(int));
             sleep(1);
             int port = ENDPOINTPORT;
