@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <signal.h>
 // for IP printing
 #include <netdb.h>
 #include <ifaddrs.h>
@@ -18,13 +19,24 @@
 #define ENDPOINTPORT 3592
 #define NI_MAXHOST 1025
 #define NI_NUMERICHOST 1
-
+void intro()
+{
+    system("clear");
+    printf("$$$$$$\\  $$\\ $$\\                      $$\\ \n");
+    printf("$$  __$$\\ $$ |\\__|                     $$ |  \n");
+    printf("$$ /  \\__|$$ |$$\\  $$$$$$\\  $$$$$$$\\ $$$$$$\\ \n");
+    printf("$$ |      $$ |$$ |$$  __$$\\ $$  __$$\\_$$  _|  \n");
+    printf("$$ |      $$ |$$ |$$$$$$$$ |$$ |  $$ | $$ |  \n");
+    printf("$$ |  $$\\ $$ |$$ |$$   ____|$$ |  $$ | $$ |$$\\ \n");
+    printf("\\$$$$$$  |$$ |$$ |\\$$$$$$$\\ $$ |  $$ | \\$$$$  | \n");
+    printf("\\______/ \\__|\\__| \\_______|\\__|  \\__|  \\____/       SP Project\n");
+}
 void File_Request_Handler(int socket)
 { // Server File Request Handler
     while (1)
     {
         char buff[255];
-        int br = read(socket, buff, 255);       // Server: Receives the request
+        int br = read(socket, buff, 255); // Server: Receives the request
         if (br < 0)
         {
             perror("FIALED to read : ");
@@ -178,9 +190,80 @@ LISTDIR:
     }
 }
 
+void start_chatting(int socket)
+{
+    char message[1024];
+    fd_set readfds;
+    while (1)
+    {
+        FD_ZERO(&readfds);
+        FD_SET(0, &readfds);
+        FD_SET(socket, &readfds);
+        int result = select(socket + 1, &readfds, NULL, NULL, NULL);
+        if (result == -1)
+        {
+            printf("Error selecting\n");
+            return;
+        }
+        if (FD_ISSET(0, &readfds))
+        {
+            memset(message, 0, sizeof(message));
+            fgets(message, 1024, stdin);
+            if (strcmp(message, "exit\n") == 0)
+            {
+                send(socket, message, strlen(message), 0);
+                break;
+            }
+            send(socket, message, strlen(message), 0);
+        }
+        if (FD_ISSET(socket, &readfds))
+        {
+            memset(message, 0, sizeof(message));
+            if (recv(socket, message, 1024, 0) == 0)
+            {
+                printf("Server disconnected\n");
+                break;
+            }
+            else if (!strcmp(message, "exit\n"))
+            {
+                break;
+            }
+            printf("Received message: %s\n", message);
+        }
+    }
+}
+
 void Server_Chat(int socket)
 {
-    File_Request_Handler(socket);
+    while (1)
+    {
+        printf("\n[*] Waiting for User Input...\n");
+        int Client_choice;
+        read(socket, &Client_choice, sizeof(int));
+        if (Client_choice == 1)
+        {
+            printf("[+] Chatting Mode Started!\n");
+            start_chatting(socket);
+            printf("[-] Chatting Ended!\n");
+            system("clear");
+            intro();
+        }
+        else if (Client_choice == 2)
+        {
+            printf("[*] Handling File Request . . .\n");
+            File_Request_Handler(socket);
+        }
+        else if (Client_choice == 3)
+        {
+            printf("[-] Exiting!\n");
+            close(socket);
+            exit(0);
+        }
+        else
+        {
+            printf("[-] Invalid Entry!\n");
+        }
+    }
 }
 void Client_Chat(int socket)
 {
@@ -191,25 +274,24 @@ void Client_Chat(int socket)
         scanf("%d", &choice);
         if (choice == 1) // Chat
         {
-            while (1)
-            {
-                char client_m[1000];
-                read(STDIN_FILENO, client_m, sizeof(client_m) + 1);
-                write(socket, client_m, strlen(client_m) + 1);
-                memset(client_m, 0, sizeof(client_m));
-                // sleep(1);
-                read(socket, client_m, sizeof(client_m) + 1);
-                printf("Message: %s", client_m);
-            }
+            printf("[+] Chatting Mode Started!\n");
+            write(socket, &choice, sizeof(int));
+            start_chatting(socket);
+            printf("[-] Chatting Ended!\n");
+            system("clear");
+            intro();
         }
         else if (choice == 2) // File
         {
-
+            write(socket, &choice, sizeof(int));
+            printf("[*] Request File Contents . . .\n");
             File_Request(socket);
         }
         else if (choice == 3)
         {
+            write(socket, &choice, sizeof(int));
             printf("[-] Exiting the client\n");
+            close(socket);
             exit(0);
         }
         else
@@ -259,21 +341,6 @@ int printIP()
     freeifaddrs(ifaddr);
 }
 
-void intro()
-{
-    system("clear");
-    printf("$$$$$$\\  $$\\ $$\\                      $$\\ \n");
-    printf("$$  __$$\\ $$ |\\__|                     $$ |  \n");
-    printf("$$ /  \\__|$$ |$$\\  $$$$$$\\  $$$$$$$\\ $$$$$$\\ \n");
-    printf("$$ |      $$ |$$ |$$  __$$\\ $$  __$$\\_$$  _|  \n");
-    printf("$$ |      $$ |$$ |$$$$$$$$ |$$ |  $$ | $$ |  \n");
-    printf("$$ |  $$\\ $$ |$$ |$$   ____|$$ |  $$ | $$ |$$\\ \n");
-    printf("\\$$$$$$  |$$ |$$ |\\$$$$$$$\\ $$ |  $$ | \\$$$$  | \n");
-    printf("\\______/ \\__|\\__| \\_______|\\__|  \\__|  \\____/       SP Project\n");
-
-    printf("\n[+] Cleint Strated Successfully \n");
-}
-
 int main(int agrc, char *argv[])
 {
     if (agrc == 1)
@@ -282,6 +349,7 @@ int main(int agrc, char *argv[])
         return EXIT_FAILURE;
     }
     intro();
+    printf("\n[+] Cleint Strated Successfully \n");
     int netwrok_socket;
     // int socket(int __domain, int __type, int __protocol) - Returns fd or -1
 
